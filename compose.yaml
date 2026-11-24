@@ -1,0 +1,273 @@
+name: bookcatalog
+
+x-mongo-data: &mongo-data
+  image: mongo:8.0
+  mem_limit: 640m
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+
+x-mongo-arbiter: &mongo-arbiter
+  image: mongo:8.0
+  mem_limit: 384m
+  healthcheck:
+    test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+
+x-mongo-init: &mongo-init
+  image: mongo:8.0
+  mem_limit: 256m
+  entrypoint: ["mongosh"]
+  volumes:
+    - ./scripts/init-replica.js:/init-replica.js:ro
+
+x-api: &api
+  image: bookcatalog-api
+  build:
+    context: .
+    dockerfile: BookCatalog.Api/Dockerfile
+  mem_limit: 320m
+  expose:
+    - "8080"
+  healthcheck:
+    test: ["CMD", "curl", "--fail", "--silent", "--max-time", "5", "http://localhost:8080/health"]
+    interval: 20s
+    timeout: 6s
+    retries: 3
+    start_period: 40s
+
+x-api-env: &api-env
+  ASPNETCORE_ENVIRONMENT: Development
+  ASPNETCORE_HTTP_PORTS: 8080
+  Redis__ConnectionString: redis:6379
+  Sync__Enabled: "true"
+
+services:
+  mongo1a:
+    <<: *mongo-data
+    command: ["mongod", "--replSet", "rs1", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    ports:
+      - "127.0.0.1:27021:27017"
+    volumes:
+      - mongo1a_data:/data/db
+  mongo1b:
+    <<: *mongo-data
+    command: ["mongod", "--replSet", "rs1", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    volumes:
+      - mongo1b_data:/data/db
+  mongo1arb:
+    <<: *mongo-arbiter
+    command: ["mongod", "--replSet", "rs1", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    volumes:
+      - mongo1arb_data:/data/db
+  mongo-init1:
+    <<: *mongo-init
+    command: ["mongodb://mongo1a:27017/admin?directConnection=true", "/init-replica.js"]
+    environment:
+      REPLICA_SET_NAME: rs1
+      PRIMARY_HOST: mongo1a:27017
+      SECONDARY_HOST: mongo1b:27017
+      ARBITER_HOST: mongo1arb:27017
+    depends_on:
+      mongo1a:
+        condition: service_healthy
+      mongo1b:
+        condition: service_healthy
+      mongo1arb:
+        condition: service_healthy
+
+  mongo2a:
+    <<: *mongo-data
+    command: ["mongod", "--replSet", "rs2", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    ports:
+      - "127.0.0.1:27022:27017"
+    volumes:
+      - mongo2a_data:/data/db
+  mongo2b:
+    <<: *mongo-data
+    command: ["mongod", "--replSet", "rs2", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    volumes:
+      - mongo2b_data:/data/db
+  mongo2arb:
+    <<: *mongo-arbiter
+    command: ["mongod", "--replSet", "rs2", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    volumes:
+      - mongo2arb_data:/data/db
+  mongo-init2:
+    <<: *mongo-init
+    command: ["mongodb://mongo2a:27017/admin?directConnection=true", "/init-replica.js"]
+    environment:
+      REPLICA_SET_NAME: rs2
+      PRIMARY_HOST: mongo2a:27017
+      SECONDARY_HOST: mongo2b:27017
+      ARBITER_HOST: mongo2arb:27017
+    depends_on:
+      mongo2a:
+        condition: service_healthy
+      mongo2b:
+        condition: service_healthy
+      mongo2arb:
+        condition: service_healthy
+
+  mongo3a:
+    <<: *mongo-data
+    command: ["mongod", "--replSet", "rs3", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    ports:
+      - "127.0.0.1:27023:27017"
+    volumes:
+      - mongo3a_data:/data/db
+  mongo3b:
+    <<: *mongo-data
+    command: ["mongod", "--replSet", "rs3", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    volumes:
+      - mongo3b_data:/data/db
+  mongo3arb:
+    <<: *mongo-arbiter
+    command: ["mongod", "--replSet", "rs3", "--bind_ip_all", "--wiredTigerCacheSizeGB", "0.256"]
+    volumes:
+      - mongo3arb_data:/data/db
+  mongo-init3:
+    <<: *mongo-init
+    command: ["mongodb://mongo3a:27017/admin?directConnection=true", "/init-replica.js"]
+    environment:
+      REPLICA_SET_NAME: rs3
+      PRIMARY_HOST: mongo3a:27017
+      SECONDARY_HOST: mongo3b:27017
+      ARBITER_HOST: mongo3arb:27017
+    depends_on:
+      mongo3a:
+        condition: service_healthy
+      mongo3b:
+        condition: service_healthy
+      mongo3arb:
+        condition: service_healthy
+
+  redis:
+    image: redis:8.2.11-alpine
+    mem_limit: 128m
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api1:
+    <<: *api
+    ports:
+      - "127.0.0.1:18081:8080"
+    environment:
+      <<: *api-env
+      MongoDb__ConnectionString: "mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1"
+      MongoDb__DatabaseName: bookcatalog1
+      Sync__InstanceId: api1
+    depends_on:
+      mongo-init1:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+  api2:
+    <<: *api
+    ports:
+      - "127.0.0.1:18082:8080"
+    environment:
+      <<: *api-env
+      MongoDb__ConnectionString: "mongodb://mongo2a:27017,mongo2b:27017/bookcatalog2?replicaSet=rs2&w=1"
+      MongoDb__DatabaseName: bookcatalog2
+      Sync__InstanceId: api2
+    depends_on:
+      mongo-init2:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+  api3:
+    <<: *api
+    ports:
+      - "127.0.0.1:18083:8080"
+    environment:
+      <<: *api-env
+      MongoDb__ConnectionString: "mongodb://mongo3a:27017,mongo3b:27017/bookcatalog3?replicaSet=rs3&w=1"
+      MongoDb__DatabaseName: bookcatalog3
+      Sync__InstanceId: api3
+    depends_on:
+      mongo-init3:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  sync:
+    <<: *api
+    environment:
+      <<: *api-env
+      Sync__Enabled: "false"
+      Sync__WorkerEnabled: "true"
+      MongoDb__ConnectionString: "mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1"
+      MongoDb__DatabaseName: bookcatalog1
+      Sync__Database1: bookcatalog1
+      Sync__Database2: bookcatalog2
+      Sync__Database3: bookcatalog3
+      Sync__Connection1: "mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1"
+      Sync__Connection2: "mongodb://mongo2a:27017,mongo2b:27017/bookcatalog2?replicaSet=rs2&w=1"
+      Sync__Connection3: "mongodb://mongo3a:27017,mongo3b:27017/bookcatalog3?replicaSet=rs3&w=1"
+    depends_on:
+      mongo-init1:
+        condition: service_completed_successfully
+      mongo-init2:
+        condition: service_completed_successfully
+      mongo-init3:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  gateway:
+    image: nginx:1.31.9-alpine
+    mem_limit: 128m
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api1:
+        condition: service_healthy
+      api2:
+        condition: service_healthy
+      api3:
+        condition: service_healthy
+      sync:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
+  seed:
+    image: mongo:8.0
+    profiles: ["seed"]
+    mem_limit: 256m
+    entrypoint: ["mongosh"]
+    command: ["mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1", "/seed.js"]
+    environment:
+      SEED_DATABASE: bookcatalog1
+    volumes:
+      - ./scripts/seed.js:/seed.js:ro
+    depends_on:
+      mongo-init1:
+        condition: service_completed_successfully
+
+volumes:
+  mongo1a_data:
+  mongo1b_data:
+  mongo1arb_data:
+  mongo2a_data:
+  mongo2b_data:
+  mongo2arb_data:
+  mongo3a_data:
+  mongo3b_data:
+  mongo3arb_data:

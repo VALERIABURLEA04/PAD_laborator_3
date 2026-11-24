@@ -1,0 +1,39 @@
+@host = http://localhost:8080
+
+GET {{host}}/api/books
+Accept: application/json
+
+###
+
+POST {{host}}/api/books
+Content-Type: application/json
+
+{
+  "title": "Foundation",
+  "author": "Isaac Asimov",
+  "publishedYear": 1951,
+  "description": "A science fiction novel.",
+  "tags": ["science fiction"]
+}
+
+###
+
+GET {{host}}/api/books/671000000000000000000001
+Accept: application/json
+
+###
+
+PUT {{host}}/api/books/671000000000000000000001
+Content-Type: application/json
+
+{
+  "title": "The Hobbit",
+  "author": "J. R. R. Tolkien",
+  "publishedYear": 1937,
+  "description": "A fantasy adventure.",
+  "tags": ["fantasy", "adventure"]
+}
+
+###
+
+DELETE {{host}}/api/books/671000000000000000000001
