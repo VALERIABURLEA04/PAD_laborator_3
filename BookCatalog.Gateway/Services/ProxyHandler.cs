@@ -228,13 +228,18 @@ public sealed class ProxyHandler(
         foreach (var (name, values) in result.Headers)
         {
             if (HopByHopHeaders.Contains(name) || ResponseHeadersSetByGateway.Contains(name)) continue;
-            response.Headers[name] = values;
+            response.Headers[name] = name.Equals("Location", StringComparison.OrdinalIgnoreCase)
+                ? values.Select(HideInternalHost).ToArray()
+                : values;
         }
         response.Headers["X-Gateway-Backend"] = result.Backend;
         response.Headers["X-Gateway-Attempts"] = result.Attempts.ToString();
         if (result.ContentType is not null) response.ContentType = result.ContentType;
         if (result.Body.Length > 0) await response.Body.WriteAsync(result.Body, context.RequestAborted);
     }
+
+    private static string HideInternalHost(string location) =>
+        Uri.TryCreate(location, UriKind.Absolute, out var uri) ? uri.PathAndQuery : location;
 
     private static async Task WriteCachedAsync(HttpContext context, CachedResponse cached, TimeSpan? remaining)
     {
