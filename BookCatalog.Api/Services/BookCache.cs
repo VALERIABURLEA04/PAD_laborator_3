@@ -6,15 +6,9 @@ namespace BookCatalog.Api.Services;
 
 public sealed record BookCacheOptions(TimeSpan TimeToLive);
 
-public sealed class BookCache(
-    IDistributedCache cache,
-    BookCacheOptions options,
-    IConfiguration configuration)
+public sealed class BookCache(IDistributedCache cache, BookCacheOptions options)
 {
-    private readonly string _databaseName = configuration["MongoDb:DatabaseName"]
-        ?? throw new InvalidOperationException("MongoDb:DatabaseName is required.");
-
-    private string Key(string id) => $"books:{_databaseName}:{id}";
+    private static string Key(string id) => $"books:{id}";
 
     public async Task<Book?> GetAsync(string id, CancellationToken cancellationToken)
     {

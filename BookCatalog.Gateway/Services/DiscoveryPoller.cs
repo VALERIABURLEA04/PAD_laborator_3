@@ -79,7 +79,7 @@ public sealed class HealthChecker(
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
             using var response = await http.GetAsync($"{backend.Address}/health", timeout.Token);
             backend.Healthy = response.IsSuccessStatusCode;
             backend.LastHealthError = response.IsSuccessStatusCode ? null : $"HTTP {(int)response.StatusCode}";

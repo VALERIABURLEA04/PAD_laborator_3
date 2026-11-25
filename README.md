@@ -8,14 +8,12 @@ API REST pentru cărți, cu Controllers, OpenAPI, MongoDB, Redis, Service Discov
 Client (Postman / browser)
    │
    ▼
-Nginx :8080  ──►  Smart Proxy (gateway) ──► api1 ──► rs1 (mongo1a, mongo1b, mongo1arb)
-                     │   │   │          ──► api2 ──► rs2 (mongo2a, mongo2b, mongo2arb)
-                     │   │   │          ──► api3 ──► rs3 (mongo3a, mongo3b, mongo3arb)
+Nginx :8080  ──►  Smart Proxy (gateway) ──► api1 ─┐      ┌─► shard1 = rs1 (mongo1a, mongo1b, mongo1arb)
+                     │   │   │          ──► api2 ─┼─ hash(id) ─► shard2 = rs2 (mongo2a, mongo2b, mongo2arb)
+                     │   │   │          ──► api3 ─┘      └─► shard3 = rs3 (mongo3a, mongo3b, mongo3arb)
                      │   │   └── Redis (cache de răspunsuri, TTL)
                      │   └────── Discovery ◄── API-urile se înregistrează + heartbeat
                      └────────── Docker socket (Kill / Restart din dashboard)
-
-sync ── citește cele 3 replica set-uri și propagă schimbările între baze
 ```
 
 | Componentă | Rol |
@@ -23,8 +21,8 @@ sync ── citește cele 3 replica set-uri și propagă schimbările între baz
 | `nginx` | Punct de intrare pe portul 8080. Trimite totul către Smart Proxy. |
 | `gateway` (`BookCatalog.Gateway`) | Smart Proxy: round robin / sticky, health check activ, circuit breaker, coadă cu priorități, cache Redis, retry, metrici, dashboard. |
 | `discovery` (`BookCatalog.Discovery`) | Registrul de servicii. Fiecare API se anunță la pornire (`POST /services`), trimite heartbeat la 5 s și se retrage la oprire. |
-| `api1`, `api2`, `api3` | Instanțele API, fiecare cu baza ei MongoDB (replica set Primary + Secondary + Arbiter). |
-| `sync` | Sincronizează cele trei baze independente (versiuni + marcaje de ștergere). |
+| `api1`, `api2`, `api3` | Instanțele API. Fiecare cunoaște toate cele 3 shard-uri și trimite fiecare carte în shard-ul care o deține. |
+| `mongo1*`, `mongo2*`, `mongo3*` | Trei shard-uri; fiecare shard este un replica set Primary + Secondary + Arbiter. |
 | `redis` | Cache-ul gateway-ului (și cache-ul intern al API-urilor pentru GET după id). |
 
 ### Fluxul unei cereri
@@ -35,7 +33,25 @@ sync ── citește cele 3 replica set-uri și propagă schimbările între baz
 4. **Load balancing:** se aleg doar instanțele care sunt UP în Discovery (heartbeat), UP la health check și au circuitul închis. Implicit **round robin**. Cu header-ul `X-Client-Id`, sau cu modul global **Sticky**, clientul ajunge mereu pe același nod (rendezvous hashing).
 5. **Circuit breaker:** după 3 eșecuri consecutive (eroare de conexiune, timeout sau 5xx) circuitul instanței se deschide pentru 15 s. Apoi trece în HALF-OPEN și lasă o singură cerere de probă.
 6. **Retry:** dacă o instanță cade, cererile idempotente (GET, PUT, DELETE) se reîncearcă pe următoarea. POST se reîncearcă doar dacă conexiunea nu s-a putut deschide.
-7. La POST / PUT / DELETE reușite, cache-ul pentru `/api/books*` se invalidează imediat și încă o dată după ~3 s, după propagarea prin `sync`.
+7. **Sharding:** API-ul calculează `hash(id)` și scrie sau citește cartea doar din shard-ul care o deține. `GET /api/books` întreabă toate shard-urile în paralel și combină rezultatele.
+8. La POST / PUT / DELETE reușite, cache-ul pentru `/api/books*` se invalidează.
+
+### Sharding
+
+Datele sunt împărțite între cele trei baze, nu copiate în toate. Cheia de sharding este id-ul cărții:
+
+1. Id-ul (ObjectId) trece printr-un hash pe 32 de biți (FNV-1a urmat de pasul final de amestecare din MurmurHash3), deci rezultatul e un număr între `0x00000000` și `0xFFFFFFFF`.
+2. Spațiul acesta e împărțit în trei intervale egale: `shard1` ia prima treime, `shard2` a doua, `shard3` a treia.
+3. Cartea stă doar în shard-ul al cărui interval conține hash-ul ei.
+
+Hash-ul e necesar pentru că ObjectId începe cu momentul creării: un interval direct pe id ar trimite toate cărțile noi în ultimul shard. Este aceeași idee ca *hashed sharding* din MongoDB, implementată în aplicație (`BookCatalog.Api/Services/ShardRouter.cs`).
+
+- Scrierile se împart pe trei baze, deci crește viteza de scriere. Fiecare bază are doar o treime din date, deci citirile sunt mai rapide.
+- **Replicarea rămâne în fiecare shard:** dacă Primary-ul unui shard cade, Secondary-ul preia rolul, iar cărțile shard-ului rămân disponibile.
+- Orice API poate servi orice carte, așa că round robin, sticky, circuit breaker și retry funcționează la fel.
+- `GET /api/shards` arată pentru fiecare shard intervalul, numărul de cărți și nodul Primary. Dashboard-ul le afișează în „Rafturile bibliotecii”.
+- Header-ul `X-Shard` din răspuns arată în ce shard s-a scris sau s-a citit cartea.
+- **Shard căzut complet** (ambele noduri cu date oprite): cărțile din celelalte shard-uri funcționează normal. `GET /api/books` întoarce ce poate, cu header-ul `X-Shards-Unavailable`. O carte din shard-ul căzut primește `503` cu `X-Shard-Unavailable`. Gateway-ul nu numără acest răspuns ca defect al API-ului (nu deschide circuitul și nu face retry), pentru că problema e în stratul de date, nu în instanță.
 
 ### Service Discovery, heartbeat și health check
 
@@ -52,7 +68,7 @@ docker compose up --build -d --remove-orphans
 docker compose --profile seed run --rm seed
 ```
 
-Seed-ul adaugă 300 de cărți demonstrative în prima bază (`SEED_COUNT` în `compose.yaml`). Serviciul `sync` le copiază în celelalte două. Scriptul poate fi rulat din nou fără dubluri.
+Seed-ul adaugă 300 de cărți demonstrative (`SEED_COUNT` în `compose.yaml`), fiecare în shard-ul care o deține, deci ~100 în fiecare bază. Scriptul poate fi rulat din nou fără dubluri. Dacă bazele au date dintr-o versiune mai veche (când toate bazele aveau toate cărțile), seed-ul mută fiecare carte în shard-ul corect și șterge copiile în plus.
 
 | Adresă | Ce este |
 | --- | --- |
@@ -87,7 +103,8 @@ Pentru butoanele Kill / Restart, gateway-ul are montat `/var/run/docker.sock` ș
 4. **Heartbeat + health check:** **Kill** pe api2. Health check-ul îl marchează DOWN în ~3 s, heartbeat-ul îl face EXPIRED în ~15 s, iar traficul merge doar la api1 și api3. **Restart**: api2 se reînregistrează singur și primește din nou cereri.
 5. **Circuit breaker:** imediat după Kill, rulează un test de încărcare. Cererile către api2 eșuează, se reîncearcă pe alt nod, iar circuitul lui api2 devine OPEN. După 15 s trece în HALF-OPEN.
 6. **JSON ↔ XML:** în „Test cerere” comută formatul. Același endpoint întoarce XML, iar POST acceptă corp XML.
-7. **Failover Mongo:** **Kill** pe `mongo1a`. `mongo1b` devine Primary, iar api1 continuă să funcționeze.
+7. **Sharding:** în „Rafturile bibliotecii” cele ~300 de cărți sunt împărțite cam 100 / 100 / 100. Creează o carte din „Test cerere”: header-ul `X-Shard` arată în ce shard a ajuns, iar contorul acelui shard crește cu 1.
+8. **Failover Mongo:** **Kill** pe `mongo1a`. `mongo1b` devine Primary, iar api1 continuă să funcționeze.
 
 ## Postman
 
@@ -134,13 +151,13 @@ Header-e opționale: `X-Priority: high|normal|low`, `X-Client-Id: <orice>` (stic
 
 ## Topologia MongoDB
 
-| API | Baza de date | Primary inițial | Secondary | Arbiter | Replica set |
+| Shard | Baza de date | Primary inițial | Secondary | Arbiter | Replica set |
 | --- | --- | --- | --- | --- | --- |
-| api1 | bookcatalog1 | mongo1a | mongo1b | mongo1arb | rs1 |
-| api2 | bookcatalog2 | mongo2a | mongo2b | mongo2arb | rs2 |
-| api3 | bookcatalog3 | mongo3a | mongo3b | mongo3arb | rs3 |
+| shard1 | bookcatalog1 | mongo1a | mongo1b | mongo1arb | rs1 |
+| shard2 | bookcatalog2 | mongo2a | mongo2b | mongo2arb | rs2 |
+| shard3 | bookcatalog3 | mongo3a | mongo3b | mongo3arb | rs3 |
 
-Fiecare Secondary păstrează o copie a bazei din perechea sa. Arbiterul votează la alegerea unui nou Primary. Serviciul `sync` propagă schimbările între bazele independente, aproximativ o dată pe secundă, așa că toate trei ajung la același set de cărți. Aceasta este replicare și sincronizare la nivelul aplicației, nu sharding MongoDB nativ (`mongos` + config servers).
+Fiecare shard este un replica set: Secondary-ul păstrează o copie a datelor shard-ului (replicare automată MongoDB), iar arbiterul votează la alegerea unui nou Primary. Shard-urile nu își copiază datele între ele: fiecare carte există într-un singur shard.
 
 Fiecare API folosește `w=1`, ca scrierile să poată continua după căderea Primary-ului. O scriere confirmată cu `w=1` se poate pierde dacă noul Primary cade înainte să fie replicată.
 
@@ -158,7 +175,7 @@ Toate serviciile au limite de memorie în `compose.yaml`. Consumul real se vede 
 .\scripts\test-smart-proxy.ps1
 ```
 
-`test-smart-proxy.ps1` verifică discovery, cache-ul (MISS → HIT), XML, round robin, sticky și coada cu priorități. Celelalte scripturi verifică CRUD-ul, sincronizarea între baze și cererile concurente.
+`test-smart-proxy.ps1` verifică discovery, cache-ul (MISS → HIT), XML, round robin, sticky și coada cu priorități. De asemenea verifică sharding-ul: fiecare shard are cărți, iar suma lor e egală cu totalul. Celelalte scripturi verifică CRUD-ul, faptul că orice API vede aceeași carte și cererile concurente.
 
 Pentru failover din linia de comandă: `docker compose stop mongo1a`, așteaptă alegerea noului Primary, rulează `.\scripts\test-cluster.ps1`, apoi `docker compose start mongo1a`.
 

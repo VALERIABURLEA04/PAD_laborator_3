@@ -1,6 +1,5 @@
 using BookCatalog.Api.Models;
 using BookCatalog.Api.Services;
-using MongoDB.Driver;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,10 +7,8 @@ builder.Services.AddControllers(options => options.ReturnHttpNotAcceptable = tru
     .AddXmlSerializerFormatters();
 builder.Services.AddOpenApi();
 
-var instanceId = builder.Configuration["Sync:InstanceId"] ?? Environment.MachineName;
-builder.Services.AddSingleton(new BookSyncOptions(
-    builder.Configuration.GetValue<bool>("Sync:Enabled"),
-    instanceId));
+var instanceId = builder.Configuration["Instance:Id"] ?? Environment.MachineName;
+builder.Services.AddSingleton(new InstanceInfo(instanceId));
 
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"]
     ?? throw new InvalidOperationException("Redis:ConnectionString is required.");
@@ -27,19 +24,10 @@ builder.Services.AddStackExchangeRedisCache(options =>
 builder.Services.AddSingleton(new BookCacheOptions(TimeSpan.FromSeconds(cacheTtlSeconds)));
 builder.Services.AddSingleton<BookCache>();
 
-var connectionString = builder.Configuration["MongoDb:ConnectionString"]
-    ?? throw new InvalidOperationException("MongoDb:ConnectionString is required.");
-var databaseName = builder.Configuration["MongoDb:DatabaseName"]
-    ?? throw new InvalidOperationException("MongoDb:DatabaseName is required.");
-
-builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(connectionString));
-builder.Services.AddSingleton<SyncVersionService>();
-builder.Services.AddSingleton(serviceProvider =>
-    serviceProvider.GetRequiredService<IMongoClient>()
-        .GetDatabase(databaseName)
-        .GetCollection<Book>("books"));
-if (builder.Configuration.GetValue<bool>("Sync:WorkerEnabled"))
-    builder.Services.AddHostedService<BookSyncWorker>();
+var shards = builder.Configuration.GetSection("Shards").Get<List<ShardSettings>>() ?? [];
+if (shards.Count == 0)
+    throw new InvalidOperationException("At least one entry in Shards is required.");
+builder.Services.AddSingleton(new ShardRouter(shards));
 
 var discoveryUrl = builder.Configuration["Discovery:Url"];
 var discoveryAddress = builder.Configuration["Discovery:Address"];
@@ -59,6 +47,8 @@ if (!string.IsNullOrWhiteSpace(discoveryUrl) && !string.IsNullOrWhiteSpace(disco
 }
 
 var app = builder.Build();
+
+app.Use(ShardUnavailable.HandleAsync);
 
 app.Use(async (context, next) =>
 {

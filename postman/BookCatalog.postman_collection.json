@@ -413,6 +413,123 @@
       ]
     },
     {
+      "name": "2b. Sharding",
+      "item": [
+        {
+          "name": "GET shards (interval, nr. cărți, primary)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/shards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "shards"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('3 shards up', () => { const s = pm.response.json(); pm.expect(s.length).to.eql(3); s.forEach(x => pm.expect(x.status).to.eql('up')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST book — vezi X-Shard",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Sharded book\",\n  \"author\": \"Test\",\n  \"publishedYear\": 2025,\n  \"tags\": [\n    \"sharding\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/books",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "books"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('bookId', pm.response.json().id);",
+                  "console.log('Stored in', pm.response.headers.get('X-Shard'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET same book — același X-Shard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Cache-Control",
+                "value": "no-cache"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/books/{{bookId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "books",
+                "{{bookId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "console.log('Read from', pm.response.headers.get('X-Shard'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "3. Cache Redis",
       "item": [
         {

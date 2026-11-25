@@ -183,3 +183,13 @@ textarea { width: 100%; font-family: Consolas, monospace; margin-top: 10px; resi
 }
 .toast.show { opacity: 1; transform: none; }
 .toast.error { border-left-color: var(--red); }
+
+.shards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 1100px) { .shards { grid-template-columns: 1fr; } }
+.shard { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+.shard-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.shard-count { font-size: 1.9rem; font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.shard-bar { height: 6px; border-radius: 3px; background: var(--border); margin: 8px 0; overflow: hidden; }
+.shard-bar span { display: block; height: 100%; background: var(--accent); }
+.shard-meta { color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.shard-meta b { color: var(--text); }

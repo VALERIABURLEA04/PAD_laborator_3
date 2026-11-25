@@ -1,5 +1,40 @@
-const books = db.getSiblingDB(process.env.SEED_DATABASE || "bookcatalog").books;
+// Seeds the sharded catalog and moves any misplaced documents to the shard that owns them.
+// Must use the same shard function as BookCatalog.Api/Services/ShardRouter.cs.
+const shardUris = [process.env.SHARD_1, process.env.SHARD_2, process.env.SHARD_3].filter(Boolean);
+if (shardUris.length === 0) throw new Error("SHARD_1..SHARD_3 are required.");
+const shards = shardUris.map(uri => connect(uri).books);
 const count = Math.max(3, parseInt(process.env.SEED_COUNT || "300", 10));
+
+function fnv1a(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b) >>> 0;
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35) >>> 0;
+  hash ^= hash >>> 16;
+  return hash >>> 0;
+}
+
+const rangeSize = Math.floor(4294967296 / shards.length);
+const shardIndexFor = id => Math.min(Math.floor(fnv1a(id.toString().toLowerCase()) / rangeSize), shards.length - 1);
+
+let moved = 0;
+let purged = 0;
+shards.forEach((collection, index) => {
+  purged += collection.deleteMany({ IsDeleted: true }).deletedCount;
+  collection.find({}).forEach(doc => {
+    const owner = shardIndexFor(doc._id.toHexString());
+    if (owner === index) return;
+    const { SyncVersion, SyncOrigin, IsDeleted, ...clean } = doc;
+    shards[owner].updateOne({ _id: doc._id }, { $setOnInsert: clean }, { upsert: true });
+    collection.deleteOne({ _id: doc._id });
+    moved++;
+  });
+});
 
 const classics = [
   { Title: "The Hobbit", Author: "J. R. R. Tolkien", PublishedYear: 1937,
@@ -19,10 +54,6 @@ const adjectives = ["Silent", "Lost", "Golden", "Hidden", "Last", "Broken", "Ete
 const nouns = ["Kingdom", "River", "Library", "Garden", "Empire", "Voyage", "Archive", "Forest", "Signal", "Harbor"];
 const tags = ["fantasy", "classic", "science fiction", "mystery", "romance", "history", "drama", "adventure", "poetry", "dystopia"];
 
-function seedId(index) {
-  return ObjectId("671000000000000000" + index.toString(16).padStart(6, "0"));
-}
-
 function generated(index) {
   const adjective = adjectives[index % adjectives.length];
   const noun = nouns[Math.floor(index / adjectives.length) % nouns.length];
@@ -35,18 +66,19 @@ function generated(index) {
   };
 }
 
-const operations = [];
+const operations = shards.map(() => []);
 for (let i = 1; i <= count; i++) {
+  const id = ObjectId("671000000000000000" + i.toString(16).padStart(6, "0"));
   const details = i <= classics.length ? classics[i - 1] : generated(i);
-  operations.push({
-    updateOne: {
-      filter: { _id: seedId(i) },
-      update: { $setOnInsert: details },
-      upsert: true
-    }
+  operations[shardIndexFor(id.toHexString())].push({
+    updateOne: { filter: { _id: id }, update: { $setOnInsert: details }, upsert: true }
   });
 }
 
-const result = books.bulkWrite(operations, { ordered: false });
-print(`Seed complete. Inserted ${result.upsertedCount}, already present ${count - result.upsertedCount}.`);
-print(`Active books in collection: ${books.countDocuments({ IsDeleted: { $ne: true } })}`);
+let inserted = 0;
+operations.forEach((ops, index) => {
+  if (ops.length > 0) inserted += shards[index].bulkWrite(ops, { ordered: false }).upsertedCount;
+});
+
+print(`Seed complete. Inserted ${inserted}, moved ${moved} misplaced, purged ${purged} deleted markers.`);
+shards.forEach((collection, index) => print(`shard${index + 1}: ${collection.countDocuments({})} books`));

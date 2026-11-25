@@ -151,6 +151,32 @@ async function refreshContainers() {
     }
 }
 
+async function refreshShards() {
+    try {
+        const response = await fetch("/api/shards", { headers: { "Cache-Control": "no-cache", "X-Priority": "low", "X-Dashboard": "1" } });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const shards = await response.json();
+        const total = shards.reduce((sum, s) => sum + Math.max(0, s.books), 0) || 1;
+        $("shards").innerHTML = shards.map(s => {
+            const up = s.status === "up";
+            const share = up ? Math.round(100 * s.books / total) : 0;
+            const members = (s.members || []).map(m => m === s.primary ? `<b>${escapeHtml(m)}</b> (primary)` : escapeHtml(m)).join(", ");
+            return `<div class="shard">
+                <div class="shard-head"><b>${escapeHtml(s.name)}</b> ${badge(up ? "UP" : "DOWN", up ? "up" : "down")}</div>
+                <div class="shard-count">${up ? s.books : "—"} <span class="muted" style="font-size:.85rem">cărți · ${share}%</span></div>
+                <div class="shard-bar"><span style="width:${share}%"></span></div>
+                <div class="shard-meta">
+                    Interval hash: <b>${escapeHtml(s.range.from)} – ${escapeHtml(s.range.to)}</b><br>
+                    Baza: <b>${escapeHtml(s.database)}</b> · replica set <b>${escapeHtml(s.replicaSet || "?")}</b><br>
+                    ${up ? `Noduri: ${members}` : `<span style="color:var(--red)">${escapeHtml(s.error || "")}</span>`}
+                </div>
+            </div>`;
+        }).join("");
+    } catch (error) {
+        $("shards").innerHTML = `<span class="muted">${escapeHtml(error.message)}</span>`;
+    }
+}
+
 document.addEventListener("click", async (event) => {
     const stateButton = event.target.closest("[data-service]");
     if (stateButton) {
@@ -190,7 +216,7 @@ document.addEventListener("click", async (event) => {
     }
 });
 
-$("refresh").addEventListener("click", () => { refreshStats(); refreshContainers(); });
+$("refresh").addEventListener("click", () => { refreshStats(); refreshContainers(); refreshShards(); });
 
 $("reset-stats").addEventListener("click", async () => {
     await api("/gateway/statistics", { method: "DELETE" }).catch(error => toast(error.message, true));
@@ -265,7 +291,7 @@ $("try-form").addEventListener("submit", async (event) => {
         const response = await fetch($("try-path").value, options);
         const text = await response.text();
         const elapsed = Math.round(performance.now() - started);
-        const shown = ["X-Gateway-Backend", "X-Api-Instance", "X-Cache", "X-Cache-TTL", "X-Priority", "X-Balancing", "X-Gateway-Attempts", "Content-Type"];
+        const shown = ["X-Gateway-Backend", "X-Api-Instance", "X-Shard", "X-Cache", "X-Cache-TTL", "X-Priority", "X-Balancing", "X-Gateway-Attempts", "Content-Type"];
         $("try-meta").innerHTML = [`<span>Status <b>${response.status}</b></span>`, `<span>Timp <b>${elapsed} ms</b></span>`]
             .concat(shown.filter(h => response.headers.get(h)).map(h => `<span>${h} <b>${escapeHtml(response.headers.get(h))}</b></span>`))
             .join("");
@@ -324,5 +350,7 @@ $("load-form").addEventListener("submit", async (event) => {
 syncBodyTemplate();
 refreshStats();
 refreshContainers();
+refreshShards();
 setInterval(refreshStats, 1000);
+setInterval(refreshShards, 3000);
 setInterval(refreshContainers, 3000);

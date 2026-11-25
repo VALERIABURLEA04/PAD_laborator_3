@@ -20,6 +20,14 @@ $routable = @($stats.backends | Where-Object routable)
 if ($routable.Count -lt 3) { throw "Expected 3 routable backends from service discovery, got $($routable.Count)." }
 Write-Host "Discovery + health check: $($routable.id -join ', ') UP"
 
+$shards = @(Invoke-RestMethod -Uri "$base/api/shards" -Headers @{ 'Cache-Control' = 'no-cache' })
+$total = @(Invoke-RestMethod -Uri "$base/api/books" -Headers @{ 'Cache-Control' = 'no-cache' }).Count
+$sum = ($shards | Measure-Object -Property books -Sum).Sum
+if ($shards.Count -ne 3 -or @($shards | Where-Object { $_.books -le 0 }).Count -gt 0 -or $sum -ne $total) {
+    throw "Sharding check failed: $($shards | ForEach-Object { "$($_.name)=$($_.books)" }) total=$total"
+}
+Write-Host "Sharding: $(($shards | ForEach-Object { "$($_.name)=$($_.books)" }) -join ', ') (total $total)"
+
 Invoke-RestMethod -Method Delete "$base/gateway/cache" | Out-Null
 $first = Get-Headers $bookUrl @{ Accept = 'application/json' }
 $second = Get-Headers $bookUrl @{ Accept = 'application/json' }

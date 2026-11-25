@@ -13,7 +13,6 @@ public sealed class GatewayOptions
     public int MaxConcurrency { get; set; } = 4;
     public int QueueTimeoutSeconds { get; set; } = 30;
     public int CacheTtlSeconds { get; set; } = 30;
-    public int SyncPropagationSeconds { get; set; } = 3;
     public string BalancingMode { get; set; } = "RoundRobin";
     public string DockerSocket { get; set; } = "/var/run/docker.sock";
     public string ComposeProject { get; set; } = "bookcatalog";
