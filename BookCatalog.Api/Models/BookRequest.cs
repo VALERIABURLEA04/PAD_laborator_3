@@ -1,7 +1,9 @@
 using System.ComponentModel.DataAnnotations;
+using System.Xml.Serialization;
 
 namespace BookCatalog.Api.Models;
 
+[XmlRoot("Book")]
 public sealed class BookRequest
 {
     [Required, StringLength(200, MinimumLength = 1)]
@@ -16,5 +18,6 @@ public sealed class BookRequest
     [StringLength(2000)]
     public string? Description { get; set; }
 
+    [XmlArrayItem("Tag")]
     public List<string> Tags { get; set; } = [];
 }

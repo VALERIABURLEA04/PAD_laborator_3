@@ -15,7 +15,7 @@ public sealed class BooksController(
     SyncVersionService versions) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<Book>>> GetAll(CancellationToken cancellationToken)
+    public async Task<ActionResult<List<Book>>> GetAll(CancellationToken cancellationToken)
     {
         var result = await books.Find(x => !x.IsDeleted)
             .ToListAsync(cancellationToken);

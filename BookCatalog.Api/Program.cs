@@ -4,14 +4,14 @@ using MongoDB.Driver;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-
-builder.Services.AddControllers();
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
+builder.Services.AddControllers(options => options.ReturnHttpNotAcceptable = true)
+    .AddXmlSerializerFormatters();
 builder.Services.AddOpenApi();
+
+var instanceId = builder.Configuration["Sync:InstanceId"] ?? Environment.MachineName;
 builder.Services.AddSingleton(new BookSyncOptions(
     builder.Configuration.GetValue<bool>("Sync:Enabled"),
-    builder.Configuration["Sync:InstanceId"] ?? Environment.MachineName));
+    instanceId));
 
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"]
     ?? throw new InvalidOperationException("Redis:ConnectionString is required.");
@@ -41,15 +41,42 @@ builder.Services.AddSingleton(serviceProvider =>
 if (builder.Configuration.GetValue<bool>("Sync:WorkerEnabled"))
     builder.Services.AddHostedService<BookSyncWorker>();
 
+var discoveryUrl = builder.Configuration["Discovery:Url"];
+var discoveryAddress = builder.Configuration["Discovery:Address"];
+if (!string.IsNullOrWhiteSpace(discoveryUrl) && !string.IsNullOrWhiteSpace(discoveryAddress))
+{
+    var discoveryOptions = new DiscoveryOptions(
+        discoveryUrl.TrimEnd('/'),
+        builder.Configuration["Discovery:ServiceName"] ?? "bookcatalog-api",
+        instanceId,
+        discoveryAddress.TrimEnd('/'),
+        TimeSpan.FromSeconds(builder.Configuration.GetValue("Discovery:HeartbeatSeconds", 5)));
+    builder.Services.AddHttpClient("discovery", client => client.Timeout = TimeSpan.FromSeconds(3));
+    builder.Services.AddHostedService(serviceProvider => new DiscoveryRegistration(
+        serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("discovery"),
+        discoveryOptions,
+        serviceProvider.GetRequiredService<ILogger<DiscoveryRegistration>>()));
+}
+
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Api-Instance"] = instanceId;
+
+    var format = context.Request.Query["format"].ToString();
+    if (format.Equals("xml", StringComparison.OrdinalIgnoreCase))
+        context.Request.Headers.Accept = "application/xml";
+    else if (format.Equals("json", StringComparison.OrdinalIgnoreCase))
+        context.Request.Headers.Accept = "application/json";
+
+    await next();
+});
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-app.UseHttpsRedirection();
 
 app.MapControllers();
 

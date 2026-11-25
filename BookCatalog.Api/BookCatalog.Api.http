@@ -37,3 +37,32 @@ Content-Type: application/json
 ###
 
 DELETE {{host}}/api/books/671000000000000000000001
+
+###
+
+GET {{host}}/api/books/671000000000000000000002
+Accept: application/xml
+
+###
+
+POST {{host}}/api/books
+Content-Type: application/xml
+Accept: application/xml
+
+<Book>
+  <Title>Solaris</Title>
+  <Author>Stanislaw Lem</Author>
+  <PublishedYear>1961</PublishedYear>
+  <Tags><Tag>science fiction</Tag></Tags>
+</Book>
+
+###
+
+GET {{host}}/api/books
+X-Priority: high
+X-Client-Id: vasile
+Cache-Control: no-cache
+
+###
+
+GET {{host}}/gateway/stats
