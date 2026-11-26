@@ -104,6 +104,34 @@ O instanță care nu mai trimite heartbeat de 2 minute e scoasă complet din reg
 7. **JSON ↔ XML:** în „Test cerere” comută formatul. Același endpoint întoarce XML, iar POST acceptă corp XML.
 8. **Failover Mongo:** **Kill** pe `mongo1a`. `mongo1b` devine Primary, iar api1 continuă să funcționeze.
 
+## Kubernetes
+
+Manifestele sunt în `k8s/` și rulează pe Kubernetes-ul din Docker Desktop (Settings → Kubernetes → Enable, metoda *Kubeadm*). Oprește întâi Docker Compose, ca să nu ruleze amândouă deodată.
+
+```powershell
+docker compose down --remove-orphans
+.\scripts\k8s-deploy.ps1            # construiește imaginile și aplică manifestele
+.\scripts\k8s-deploy.ps1 -Delete    # șterge tot din cluster
+```
+
+| Componentă | Resursă Kubernetes |
+|---|---|
+| API + MongoDB propriu | `StatefulSet api` (3 pod-uri `api-0..2`). Fiecare pod are containerul API și un MongoDB cu disc persistent (`PersistentVolumeClaim`). |
+| sync, discovery, redis, gateway, nginx | `Deployment` + `Service` |
+| Intrarea | `Service nginx` de tip `LoadBalancer` pe `http://localhost:8080` |
+| Popularea bazei | `Job seed` |
+| Health check | `readinessProbe` / `livenessProbe` pe fiecare container |
+| Kill din dashboard | gateway-ul șterge pod-ul prin API-ul Kubernetes (`ServiceAccount` + `Role` doar pentru pod-uri), iar Kubernetes îl recreează |
+
+Scalarea la oricâte API-uri, fiecare cu baza lui:
+
+```powershell
+kubectl scale statefulset api -n bookcatalog --replicas=5
+kubectl get pods -n bookcatalog -w
+```
+
+Pod-urile noi se înregistrează în Discovery, iar serviciul `sync` le copiază toate cărțile.
+
 ## Postman
 
 Importă `postman/BookCatalog.postman_collection.json`. Folderele merg în ordine: CRUD JSON, XML, Cache, Load balancing, Priority queue, Discovery / health / circuit breaker. Variabila `bookId` se completează automat după POST.

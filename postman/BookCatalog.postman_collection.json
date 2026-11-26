@@ -16,6 +16,10 @@
     {
       "key": "bookId",
       "value": "671000000000000000000001"
+    },
+    {
+      "key": "api",
+      "value": "api2"
     }
   ],
   "item": [
@@ -1082,7 +1086,7 @@
           ]
         },
         {
-          "name": "Kill api2 (container)",
+          "name": "Kill {{api}} (container)",
           "request": {
             "method": "PUT",
             "header": [
@@ -1092,14 +1096,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/gateway/containers/api2/state",
+              "raw": "{{baseUrl}}/gateway/containers/{{api}}/state",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "gateway",
                 "containers",
-                "api2",
+                "{{api}}",
                 "state"
               ]
             },
@@ -1126,7 +1130,7 @@
           ]
         },
         {
-          "name": "Restart api2",
+          "name": "Restart {{api}}",
           "request": {
             "method": "PUT",
             "header": [
@@ -1136,14 +1140,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/gateway/containers/api2/state",
+              "raw": "{{baseUrl}}/gateway/containers/{{api}}/state",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "gateway",
                 "containers",
-                "api2",
+                "{{api}}",
                 "state"
               ]
             },
@@ -1170,7 +1174,7 @@
           ]
         },
         {
-          "name": "Simulează eroare pe api2",
+          "name": "Simulează eroare pe {{api}}",
           "request": {
             "method": "PUT",
             "header": [
@@ -1180,14 +1184,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/gateway/backends/api2/fault",
+              "raw": "{{baseUrl}}/gateway/backends/{{api}}/fault",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "gateway",
                 "backends",
-                "api2",
+                "{{api}}",
                 "fault"
               ]
             },
@@ -1203,7 +1207,7 @@
           }
         },
         {
-          "name": "Oprește eroarea pe api2",
+          "name": "Oprește eroarea pe {{api}}",
           "request": {
             "method": "PUT",
             "header": [
@@ -1213,14 +1217,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/gateway/backends/api2/fault",
+              "raw": "{{baseUrl}}/gateway/backends/{{api}}/fault",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "gateway",
                 "backends",
-                "api2",
+                "{{api}}",
                 "fault"
               ]
             },
@@ -1236,19 +1240,19 @@
           }
         },
         {
-          "name": "Reset circuit of api2",
+          "name": "Reset circuit of {{api}}",
           "request": {
             "method": "PUT",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/gateway/backends/api2/circuit",
+              "raw": "{{baseUrl}}/gateway/backends/{{api}}/circuit",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "gateway",
                 "backends",
-                "api2",
+                "{{api}}",
                 "circuit"
               ]
             }

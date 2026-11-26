@@ -43,7 +43,7 @@ public sealed class BookSyncWorker(
     }
 
     // Every API registers its own database in Service Discovery, so a new API joins the
-    // synchronization automatically and a removed one leaves it once Discovery forgets it.
+    // synchronization automatically; one that stops sending heartbeats is skipped until it returns.
     private async Task<List<IMongoCollection<Book>>> DiscoverDatabasesAsync(
         HttpClient http, string discoveryUrl, string serviceName, CancellationToken cancellationToken)
     {
@@ -54,7 +54,8 @@ public sealed class BookSyncWorker(
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var instance in instances)
         {
-            if (instance.Metadata is null ||
+            if (!string.Equals(instance.Status, "up", StringComparison.OrdinalIgnoreCase) ||
+                instance.Metadata is null ||
                 !instance.Metadata.TryGetValue("mongo", out var connection) ||
                 !instance.Metadata.TryGetValue("database", out var database) ||
                 string.IsNullOrWhiteSpace(connection) || string.IsNullOrWhiteSpace(database))

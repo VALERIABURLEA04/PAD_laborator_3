@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  default.conf: |
+    upstream smart_proxy {
+        server gateway:8080 max_fails=3 fail_timeout=5s;
+    }
+
+    server {
+        listen 80;
+        server_name _;
+
+        location = /nginx-health {
+            access_log off;
+            return 200 "ok\n";
+        }
+
+        location / {
+            proxy_pass http://smart_proxy;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header Connection "";
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 120s;
+            add_header X-Edge nginx always;
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: nginx }
+  template:
+    metadata:
+      labels: { app: nginx }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.31.9-alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - { name: config, mountPath: /etc/nginx/conf.d }
+          resources:
+            requests: { memory: 16Mi, cpu: 20m }
+            limits: { memory: 64Mi }
+          readinessProbe:
+            httpGet: { path: /nginx-health, port: 80 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /nginx-health, port: 80 }
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap: { name: nginx-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  type: LoadBalancer
+  selector: { app: nginx }
+  ports:
+    - port: 8080
+      targetPort: 80

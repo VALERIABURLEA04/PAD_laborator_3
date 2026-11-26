@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discovery
+spec:
+  # The registry lives in memory, so there must be exactly one instance.
+  replicas: 1
+  selector:
+    matchLabels: { app: discovery }
+  template:
+    metadata:
+      labels: { app: discovery }
+    spec:
+      containers:
+        - name: discovery
+          image: bookcatalog-discovery:latest
+          imagePullPolicy: Never
+          env:
+            - { name: ASPNETCORE_HTTP_PORTS, value: "8080" }
+            - { name: Discovery__HeartbeatTimeoutSeconds, value: "15" }
+            - { name: Discovery__PurgeAfterSeconds, value: "120" }
+          ports:
+            - containerPort: 8080
+          resources:
+            requests: { memory: 64Mi, cpu: 20m }
+            limits: { memory: 160Mi }
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: discovery
+spec:
+  selector: { app: discovery }
+  ports:
+    - port: 8080

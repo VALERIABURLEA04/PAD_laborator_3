@@ -15,6 +15,7 @@ public sealed class GatewayOptions
     public int CacheTtlSeconds { get; set; } = 30;
     public int SyncPropagationSeconds { get; set; } = 3;
     public string BalancingMode { get; set; } = "RoundRobin";
+    public string Orchestrator { get; set; } = "docker";
     public string DockerSocket { get; set; } = "/var/run/docker.sock";
     public string ComposeProject { get; set; } = "bookcatalog";
     public string[] ProtectedServices { get; set; } = [];

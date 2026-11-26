@@ -33,7 +33,10 @@ builder.Services.AddSingleton<PriorityGate>();
 builder.Services.AddSingleton<ResponseCache>();
 builder.Services.AddSingleton<GatewayMetrics>();
 builder.Services.AddSingleton<ProxyHandler>();
-builder.Services.AddSingleton<DockerControl>();
+if (string.Equals(options.Orchestrator, "kubernetes", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddSingleton<IContainerControl, KubernetesControl>();
+else
+    builder.Services.AddSingleton<IContainerControl, DockerControl>();
 builder.Services.AddSingleton<LoadTester>();
 builder.Services.AddHostedService<DiscoveryPoller>();
 builder.Services.AddHostedService<HealthChecker>();
@@ -144,24 +147,24 @@ gateway.MapDelete("/statistics", (GatewayMetrics metrics, ResponseCache cache, P
     return Results.NoContent();
 });
 
-gateway.MapGet("/containers", async (DockerControl docker, CancellationToken cancellationToken) =>
+gateway.MapGet("/containers", async (IContainerControl control, CancellationToken cancellationToken) =>
 {
     try
     {
-        return Results.Ok(await docker.ListAsync(cancellationToken));
+        return Results.Ok(await control.ListAsync(cancellationToken));
     }
-    catch (DockerUnavailableException exception)
+    catch (ContainerControlUnavailableException exception)
     {
         return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
 
 gateway.MapPut("/containers/{service}/state", async (
-    string service, ContainerStateUpdate update, DockerControl docker, CancellationToken cancellationToken) =>
+    string service, ContainerStateUpdate update, IContainerControl control, CancellationToken cancellationToken) =>
 {
     try
     {
-        return Results.Ok(await docker.SetStateAsync(service, update.State, cancellationToken));
+        return Results.Ok(await control.SetStateAsync(service, update.State, cancellationToken));
     }
     catch (KeyNotFoundException exception)
     {
@@ -175,7 +178,7 @@ gateway.MapPut("/containers/{service}/state", async (
     {
         return Results.Problem(exception.Message, statusCode: StatusCodes.Status409Conflict);
     }
-    catch (DockerUnavailableException exception)
+    catch (ContainerControlUnavailableException exception)
     {
         return Results.Problem(exception.Message, statusCode: StatusCodes.Status503ServiceUnavailable);
     }

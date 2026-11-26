@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: sync }
+  template:
+    metadata:
+      labels: { app: sync }
+    spec:
+      containers:
+        - name: sync
+          image: bookcatalog-api:latest
+          imagePullPolicy: Never
+          env:
+            - { name: ASPNETCORE_ENVIRONMENT, value: Development }
+            - { name: ASPNETCORE_HTTP_PORTS, value: "8080" }
+            - { name: Redis__ConnectionString, value: "redis:6379" }
+            - { name: Sync__Enabled, value: "false" }
+            - { name: Sync__WorkerEnabled, value: "true" }
+            - { name: Sync__InstanceId, value: sync }
+            - { name: Sync__DiscoveryUrl, value: "http://discovery:8080" }
+            - { name: Sync__ServiceName, value: bookcatalog-api }
+            - { name: Discovery__Url, value: "" }
+            - { name: MongoDb__ConnectionString, value: "mongodb://api-0.api:27017/?directConnection=true" }
+            - { name: MongoDb__DatabaseName, value: bookcatalog-api-0 }
+          resources:
+            requests: { memory: 96Mi, cpu: 50m }
+            limits: { memory: 256Mi }
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 20
+            periodSeconds: 10

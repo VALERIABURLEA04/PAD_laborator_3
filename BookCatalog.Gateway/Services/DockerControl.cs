@@ -3,12 +3,8 @@ using System.Text.Json;
 
 namespace BookCatalog.Gateway.Services;
 
-public sealed record ContainerInfo(string Service, string ContainerId, string State, string Status, bool Protected);
-
-public sealed class DockerUnavailableException(string message) : Exception(message);
-
 /// <summary>Talks to the Docker Engine API through the mounted /var/run/docker.sock.</summary>
-public sealed class DockerControl : IDisposable
+public sealed class DockerControl : IContainerControl, IDisposable
 {
     private readonly GatewayOptions _options;
     private readonly HttpClient _http;
@@ -122,7 +118,7 @@ public sealed class DockerControl : IDisposable
         }
         catch (HttpRequestException exception)
         {
-            throw new DockerUnavailableException(
+            throw new ContainerControlUnavailableException(
                 $"Docker socket {_options.DockerSocket} is not reachable: {exception.Message}");
         }
     }
