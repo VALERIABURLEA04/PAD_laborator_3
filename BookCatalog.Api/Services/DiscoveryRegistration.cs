@@ -8,7 +8,9 @@ public sealed record DiscoveryOptions(
     string ServiceName,
     string InstanceId,
     string Address,
-    TimeSpan HeartbeatInterval);
+    TimeSpan HeartbeatInterval,
+    string Database,
+    string MongoConnection);
 
 public sealed class DiscoveryRegistration(
     HttpClient http,
@@ -48,7 +50,12 @@ public sealed class DiscoveryRegistration(
         {
             id = options.InstanceId,
             name = options.ServiceName,
-            address = options.Address
+            address = options.Address,
+            metadata = new Dictionary<string, string>
+            {
+                ["database"] = options.Database,
+                ["mongo"] = options.MongoConnection
+            }
         }, cancellationToken);
         response.EnsureSuccessStatusCode();
         _registered = true;

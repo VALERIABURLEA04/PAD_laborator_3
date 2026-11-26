@@ -1,5 +1,6 @@
 using BookCatalog.Api.Models;
 using BookCatalog.Api.Services;
+using MongoDB.Driver;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,8 +8,10 @@ builder.Services.AddControllers(options => options.ReturnHttpNotAcceptable = tru
     .AddXmlSerializerFormatters();
 builder.Services.AddOpenApi();
 
-var instanceId = builder.Configuration["Instance:Id"] ?? Environment.MachineName;
-builder.Services.AddSingleton(new InstanceInfo(instanceId));
+var instanceId = builder.Configuration["Instance:Id"] ?? builder.Configuration["Sync:InstanceId"] ?? Environment.MachineName;
+builder.Services.AddSingleton(new BookSyncOptions(
+    builder.Configuration.GetValue<bool>("Sync:Enabled"),
+    instanceId));
 
 var redisConnectionString = builder.Configuration["Redis:ConnectionString"]
     ?? throw new InvalidOperationException("Redis:ConnectionString is required.");
@@ -23,11 +26,24 @@ builder.Services.AddStackExchangeRedisCache(options =>
 });
 builder.Services.AddSingleton(new BookCacheOptions(TimeSpan.FromSeconds(cacheTtlSeconds)));
 builder.Services.AddSingleton<BookCache>();
+builder.Services.AddSingleton<FaultState>();
 
-var shards = builder.Configuration.GetSection("Shards").Get<List<ShardSettings>>() ?? [];
-if (shards.Count == 0)
-    throw new InvalidOperationException("At least one entry in Shards is required.");
-builder.Services.AddSingleton(new ShardRouter(shards));
+var connectionString = builder.Configuration["MongoDb:ConnectionString"]
+    ?? throw new InvalidOperationException("MongoDb:ConnectionString is required.");
+var databaseName = builder.Configuration["MongoDb:DatabaseName"]
+    ?? throw new InvalidOperationException("MongoDb:DatabaseName is required.");
+
+builder.Services.AddSingleton<IMongoClient>(_ => new MongoClient(connectionString));
+builder.Services.AddSingleton<SyncVersionService>();
+builder.Services.AddSingleton(serviceProvider =>
+    serviceProvider.GetRequiredService<IMongoClient>()
+        .GetDatabase(databaseName)
+        .GetCollection<Book>("books"));
+if (builder.Configuration.GetValue<bool>("Sync:WorkerEnabled"))
+{
+    builder.Services.AddHttpClient("sync-discovery", client => client.Timeout = TimeSpan.FromSeconds(3));
+    builder.Services.AddHostedService<BookSyncWorker>();
+}
 
 var discoveryUrl = builder.Configuration["Discovery:Url"];
 var discoveryAddress = builder.Configuration["Discovery:Address"];
@@ -38,7 +54,9 @@ if (!string.IsNullOrWhiteSpace(discoveryUrl) && !string.IsNullOrWhiteSpace(disco
         builder.Configuration["Discovery:ServiceName"] ?? "bookcatalog-api",
         instanceId,
         discoveryAddress.TrimEnd('/'),
-        TimeSpan.FromSeconds(builder.Configuration.GetValue("Discovery:HeartbeatSeconds", 5)));
+        TimeSpan.FromSeconds(builder.Configuration.GetValue("Discovery:HeartbeatSeconds", 5)),
+        databaseName,
+        connectionString);
     builder.Services.AddHttpClient("discovery", client => client.Timeout = TimeSpan.FromSeconds(3));
     builder.Services.AddHostedService(serviceProvider => new DiscoveryRegistration(
         serviceProvider.GetRequiredService<IHttpClientFactory>().CreateClient("discovery"),
@@ -48,11 +66,24 @@ if (!string.IsNullOrWhiteSpace(discoveryUrl) && !string.IsNullOrWhiteSpace(disco
 
 var app = builder.Build();
 
-app.Use(ShardUnavailable.HandleAsync);
+// Simulated outage for the circuit breaker demo: book requests fail while /health stays green,
+// so the instance stays in rotation and only the gateway's circuit breaker can take it out.
+app.Use(async (context, next) =>
+{
+    if (context.RequestServices.GetRequiredService<FaultState>().Enabled &&
+        context.Request.Path.StartsWithSegments("/api/books"))
+    {
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        await context.Response.WriteAsJsonAsync(new { status = 503, error = "Simulated failure" });
+        return;
+    }
+    await next();
+});
 
 app.Use(async (context, next) =>
 {
     context.Response.Headers["X-Api-Instance"] = instanceId;
+    context.Response.Headers["X-Database"] = databaseName;
 
     var format = context.Request.Query["format"].ToString();
     if (format.Equals("xml", StringComparison.OrdinalIgnoreCase))

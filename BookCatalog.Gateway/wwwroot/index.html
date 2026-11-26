@@ -3,67 +3,54 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BookCatalog — Centrul de control al bibliotecii</title>
+    <title>BookCatalog</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="topbar">
-    <h1>📚 BookCatalog — Centrul de control al bibliotecii</h1>
+    <h1>📚 BookCatalog</h1>
     <div class="topbar-actions">
         <span id="live" class="live"><span class="dot"></span><span id="clock">--:--:--</span></span>
         <div class="segmented" id="balancing">
             <button data-mode="RoundRobin">Round robin</button>
             <button data-mode="Sticky">Sticky</button>
         </div>
-        <button class="btn ghost" id="reset-stats" title="Resetează metricile, cache-ul și coada">Reset statistici</button>
-        <button class="btn" id="refresh">Refresh</button>
+        <button class="btn ghost" id="reset-stats">Reset statistici</button>
     </div>
 </header>
 
 <main class="grid">
     <section class="card span-3">
         <div class="card-head">
-            <h2>🏛️ Filialele bibliotecii (instanțe API din Service Discovery)</h2>
-            <span class="muted" id="discovery-state">discovery: …</span>
+            <h2>Instanțe API</h2>
+            <span class="muted" id="discovery-state"></span>
         </div>
         <table class="table">
             <thead>
-            <tr>
-                <th>Backend</th>
-                <th>Adresă</th>
-                <th>Health check</th>
-                <th>Heartbeat</th>
-                <th>Circuit</th>
-                <th>Cereri / Eșecuri</th>
-                <th>Ultima latență</th>
-                <th>Acțiuni</th>
-            </tr>
+            <tr><th>API</th><th>Health</th><th>Circuit</th><th>Cereri</th><th>Latență</th><th></th></tr>
             </thead>
-            <tbody id="backends">
-            <tr><td colspan="8" class="muted">Se așteaptă înregistrarea API-urilor…</td></tr>
-            </tbody>
+            <tbody id="backends"></tbody>
         </table>
     </section>
 
     <section class="card span-3">
         <div class="card-head">
-            <h2>🗂️ Rafturile bibliotecii (shard-uri MongoDB)</h2>
-            <span class="muted">cheia de sharding: hash(id) împărțit în 3 intervale egale</span>
+            <h2>Baze de date</h2>
+            <span id="sync-state"></span>
         </div>
-        <div class="shards" id="shards"><span class="muted">…</span></div>
+        <div class="databases" id="databases"></div>
     </section>
 
     <section class="card">
-        <h2>📊 Metrici latență (global)</h2>
+        <h2>Latență</h2>
         <div class="tiles">
             <div class="tile"><span class="label">P50</span><span class="value" id="p50">0</span><span class="unit">ms</span></div>
             <div class="tile"><span class="label">P95</span><span class="value" id="p95">0</span><span class="unit">ms</span></div>
             <div class="tile"><span class="label">P99</span><span class="value" id="p99">0</span><span class="unit">ms</span></div>
         </div>
         <div class="kv">
-            <span>Cereri totale <b id="total">0</b></span>
-            <span>Cereri/s <b id="rps">0</b></span>
+            <span>Cereri <b id="total">0</b></span>
             <span>Erori 5xx <b id="errors">0</b></span>
             <span>Retry-uri <b id="retries">0</b></span>
         </div>
@@ -71,7 +58,7 @@
 
     <section class="card">
         <div class="card-head">
-            <h2>💾 Cache (Redis la gateway)</h2>
+            <h2>Cache Redis</h2>
             <button class="btn ghost small" id="clear-cache">Golește</button>
         </div>
         <div class="tiles">
@@ -82,26 +69,23 @@
         <div class="kv">
             <span>Chei <b id="keys">0</b></span>
             <span>TTL <b id="ttl">0</b> s</span>
-            <span>Bypass <b id="bypassed">0</b></span>
-            <span>Invalidări <b id="invalidations">0</b></span>
         </div>
     </section>
 
     <section class="card">
-        <h2>📋 Priority queue</h2>
+        <h2>Coadă cu priorități</h2>
         <div class="tiles">
-            <div class="tile high"><span class="label">HIGH</span><span class="value" id="q-high">0</span><span class="unit" id="q-high-info">0 procesate</span></div>
-            <div class="tile normal"><span class="label">NORMAL</span><span class="value" id="q-normal">0</span><span class="unit" id="q-normal-info">0 procesate</span></div>
-            <div class="tile low"><span class="label">LOW</span><span class="value" id="q-low">0</span><span class="unit" id="q-low-info">0 procesate</span></div>
+            <div class="tile high"><span class="label">HIGH</span><span class="value" id="q-high">0</span><span class="unit" id="q-high-info"></span></div>
+            <div class="tile normal"><span class="label">NORMAL</span><span class="value" id="q-normal">0</span><span class="unit" id="q-normal-info"></span></div>
+            <div class="tile low"><span class="label">LOW</span><span class="value" id="q-low">0</span><span class="unit" id="q-low-info"></span></div>
         </div>
         <div class="kv">
-            <span>Active <b id="q-active">0</b> / <b id="q-max">0</b></span>
-            <span class="muted">în așteptare acum · timp mediu de așteptare dedesubt</span>
+            <span>În lucru <b id="q-active">0</b> / <b id="q-max">0</b></span>
         </div>
     </section>
 
     <section class="card span-2">
-        <h2>🧪 Test cerere (JSON ↔ XML, prioritate, sticky)</h2>
+        <h2>Test cerere</h2>
         <form id="try-form" class="form-row">
             <select id="try-method">
                 <option>GET</option>
@@ -109,7 +93,7 @@
                 <option>PUT</option>
                 <option>DELETE</option>
             </select>
-            <input id="try-path" value="/api/books/671000000000000000000001" spellcheck="false">
+            <input id="try-path" value="/api/books?page=1&pageSize=5" spellcheck="false">
             <select id="try-format">
                 <option value="json">JSON</option>
                 <option value="xml">XML</option>
@@ -119,46 +103,42 @@
                 <option value="normal" selected>NORMAL</option>
                 <option value="low">LOW</option>
             </select>
-            <input id="try-client" placeholder="X-Client-Id (sticky)" spellcheck="false">
-            <label class="check"><input type="checkbox" id="try-nocache"> no-cache</label>
+            <input id="try-client" placeholder="Client (sticky)" spellcheck="false">
+            <label class="check"><input type="checkbox" id="try-nocache"> fără cache</label>
             <button class="btn" type="submit">Trimite</button>
         </form>
-        <textarea id="try-body" rows="4" spellcheck="false" placeholder="Corp pentru POST/PUT (se completează automat după format)"></textarea>
+        <textarea id="try-body" rows="6" spellcheck="false"></textarea>
         <div id="try-meta" class="meta"></div>
-        <pre id="try-response" class="response">Răspunsul apare aici.</pre>
+        <pre id="try-response" class="response"></pre>
     </section>
 
     <section class="card">
-        <h2>🚀 Test de încărcare (coada cu priorități)</h2>
+        <h2>Test de încărcare</h2>
         <form id="load-form" class="form-grid">
-            <label>Cereri <input type="number" id="load-total" value="120" min="1" max="2000"></label>
+            <label>Cereri <input type="number" id="load-total" value="60" min="1" max="2000"></label>
             <label>% HIGH <input type="number" id="load-high" value="20" min="0" max="100"></label>
             <label>% LOW <input type="number" id="load-low" value="50" min="0" max="100"></label>
             <label class="check"><input type="checkbox" id="load-bypass" checked> fără cache</label>
             <button class="btn" type="submit" id="load-run">Pornește</button>
         </form>
-        <p class="muted small-text">Cererile LOW pleacă primele, HIGH ultimele. Dacă HIGH are totuși timpul mediu cel mai mic, înseamnă că lucrează coada.</p>
-        <div id="load-result" class="muted">Niciun test rulat.</div>
+        <div id="load-result"></div>
     </section>
 
     <section class="card span-2">
-        <h2>🧾 Ultimele cereri</h2>
+        <h2>Ultimele cereri</h2>
         <div class="scroll">
             <table class="table compact">
-                <thead>
-                <tr><th>Ora</th><th>Metodă</th><th>Cale</th><th>Status</th><th>Backend</th><th>Cache</th><th>Prioritate</th><th>ms</th></tr>
-                </thead>
+                <thead><tr><th>Ora</th><th>Cerere</th><th>Status</th><th>API</th><th>Cache</th><th>ms</th></tr></thead>
                 <tbody id="recent"></tbody>
             </table>
         </div>
     </section>
 
     <section class="card">
-        <h2>🐳 Containere (failover Mongo, Redis, sync)</h2>
+        <h2>Containere</h2>
         <div class="scroll">
             <table class="table compact">
-                <thead><tr><th>Serviciu</th><th>Stare</th><th></th></tr></thead>
-                <tbody id="containers"><tr><td colspan="3" class="muted">…</td></tr></tbody>
+                <tbody id="containers"></tbody>
             </table>
         </div>
     </section>

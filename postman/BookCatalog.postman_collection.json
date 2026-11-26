@@ -413,26 +413,21 @@
       ]
     },
     {
-      "name": "2b. Sharding",
+      "name": "2b. Sincronizarea bazelor (sync)",
       "item": [
         {
-          "name": "GET shards (interval, nr. cărți, primary)",
+          "name": "GET starea celor 3 baze",
           "request": {
             "method": "GET",
-            "header": [
-              {
-                "key": "Cache-Control",
-                "value": "no-cache"
-              }
-            ],
+            "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/shards",
+              "raw": "{{baseUrl}}/gateway/databases",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
-                "api",
-                "shards"
+                "gateway",
+                "databases"
               ]
             }
           },
@@ -442,25 +437,29 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('3 shards up', () => { const s = pm.response.json(); pm.expect(s.length).to.eql(3); s.forEach(x => pm.expect(x.status).to.eql('up')); });"
+                  "pm.test('Toate bazele au aceleași cărți', () => { const d = pm.response.json().filter(x => x.status === 'up'); pm.expect(d.length).to.be.at.least(3); d.forEach(x => pm.expect(x.info.books).to.eql(d[0].info.books)); });"
                 ]
               }
             }
           ]
         },
         {
-          "name": "POST book — vezi X-Shard",
+          "name": "POST book pe api1 (vezi X-Database)",
           "request": {
             "method": "POST",
             "header": [
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Client-Id",
+                "value": "k0"
               }
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Sharded book\",\n  \"author\": \"Test\",\n  \"publishedYear\": 2025,\n  \"tags\": [\n    \"sharding\"\n  ]\n}",
+              "raw": "{\n  \"title\": \"Sync demo\",\n  \"author\": \"Test\",\n  \"publishedYear\": 2025,\n  \"tags\": [\n    \"sync\"\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -486,20 +485,24 @@
                 "exec": [
                   "pm.test('201', () => pm.response.to.have.status(201));",
                   "pm.collectionVariables.set('bookId', pm.response.json().id);",
-                  "console.log('Stored in', pm.response.headers.get('X-Shard'));"
+                  "console.log('Scrisă în', pm.response.headers.get('X-Database'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "GET same book — același X-Shard",
+          "name": "GET aceeași carte de pe alt API (după ~2 s)",
           "request": {
             "method": "GET",
             "header": [
               {
                 "key": "Cache-Control",
                 "value": "no-cache"
+              },
+              {
+                "key": "X-Client-Id",
+                "value": "k1"
               }
             ],
             "url": {
@@ -520,8 +523,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200', () => pm.response.to.have.status(200));",
-                  "console.log('Read from', pm.response.headers.get('X-Shard'));"
+                  "pm.test('200 din altă bază', () => pm.response.to.have.status(200));",
+                  "console.log('Citită din', pm.response.headers.get('X-Database'));"
                 ]
               }
             }
@@ -1165,6 +1168,72 @@
               }
             }
           ]
+        },
+        {
+          "name": "Simulează eroare pe api2",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/gateway/backends/api2/fault",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gateway",
+                "backends",
+                "api2",
+                "fault"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"enabled\": true}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Oprește eroarea pe api2",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/gateway/backends/api2/fault",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "gateway",
+                "backends",
+                "api2",
+                "fault"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"enabled\": false}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         },
         {
           "name": "Reset circuit of api2",

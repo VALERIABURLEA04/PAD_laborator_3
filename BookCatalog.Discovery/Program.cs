@@ -4,6 +4,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var heartbeatTimeout = TimeSpan.FromSeconds(
     builder.Configuration.GetValue("Discovery:HeartbeatTimeoutSeconds", 15));
+var purgeAfter = TimeSpan.FromSeconds(
+    builder.Configuration.GetValue("Discovery:PurgeAfterSeconds", 120));
 
 var app = builder.Build();
 var services = new ConcurrentDictionary<string, ServiceInstance>(StringComparer.OrdinalIgnoreCase);
@@ -18,11 +20,15 @@ ServiceView ToView(ServiceInstance instance)
         instance.Id, instance.Name, instance.Address, status,
         instance.RegisteredAt, instance.LastHeartbeat,
         (long)(now - instance.LastHeartbeat).TotalMilliseconds,
-        instance.HeartbeatCount);
+        instance.HeartbeatCount,
+        instance.Metadata);
 }
 
 app.MapGet("/services", (string? name) =>
 {
+    foreach (var stale in services.Values.Where(x => DateTimeOffset.UtcNow - x.LastHeartbeat > purgeAfter))
+        services.TryRemove(stale.Id, out _);
+
     var result = services.Values
         .Where(x => name is null || string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase))
         .OrderBy(x => x.Id, StringComparer.OrdinalIgnoreCase)
@@ -43,11 +49,13 @@ app.MapPost("/services", (RegistrationRequest request, ILogger<Program> logger) 
     }
 
     var now = DateTimeOffset.UtcNow;
+    var metadata = request.Metadata ?? new Dictionary<string, string>();
     var instance = services.AddOrUpdate(request.Id,
-        _ => new ServiceInstance(request.Id, request.Name, request.Address.TrimEnd('/'), now),
+        _ => new ServiceInstance(request.Id, request.Name, request.Address.TrimEnd('/'), now) { Metadata = metadata },
         (_, existing) => existing with
         {
             Name = request.Name,
+            Metadata = metadata,
             Address = request.Address.TrimEnd('/'),
             RegisteredAt = now,
             LastHeartbeat = now,
@@ -72,8 +80,15 @@ app.MapPut("/services/{id}/heartbeat", (string id) =>
     return Results.NotFound();
 });
 
-app.MapDelete("/services/{id}", (string id, ILogger<Program> logger) =>
+app.MapDelete("/services/{id}", (string id, bool? permanent, ILogger<Program> logger) =>
 {
+    if (permanent == true)
+    {
+        if (!services.TryRemove(id, out _)) return Results.NotFound();
+        logger.LogInformation("Removed {Id} permanently.", id);
+        return Results.NoContent();
+    }
+
     while (services.TryGetValue(id, out var existing))
     {
         if (services.TryUpdate(id, existing with { Deregistered = true }, existing))
@@ -89,16 +104,18 @@ app.MapGet("/health", () => Results.Ok(new { status = "healthy", registered = se
 
 app.Run();
 
-record RegistrationRequest(string Id, string Name, string Address);
+record RegistrationRequest(string Id, string Name, string Address, Dictionary<string, string>? Metadata);
 
 record ServiceInstance(string Id, string Name, string Address, DateTimeOffset RegisteredAt)
 {
     public DateTimeOffset LastHeartbeat { get; init; } = RegisteredAt;
     public long HeartbeatCount { get; init; }
     public bool Deregistered { get; init; }
+    public Dictionary<string, string> Metadata { get; init; } = new();
 }
 
 record ServiceView(
     string Id, string Name, string Address, string Status,
     DateTimeOffset RegisteredAt, DateTimeOffset LastHeartbeat,
-    long MillisecondsSinceHeartbeat, long HeartbeatCount);
+    long MillisecondsSinceHeartbeat, long HeartbeatCount,
+    Dictionary<string, string> Metadata);

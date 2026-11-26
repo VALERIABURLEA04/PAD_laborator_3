@@ -1,4 +1,4 @@
-param([string]$BaseUrl = 'http://localhost:8080')
+﻿param([string]$BaseUrl = 'http://localhost:8080')
 
 $ErrorActionPreference = 'Stop'
 $base = $BaseUrl.TrimEnd('/')
@@ -20,13 +20,12 @@ $routable = @($stats.backends | Where-Object routable)
 if ($routable.Count -lt 3) { throw "Expected 3 routable backends from service discovery, got $($routable.Count)." }
 Write-Host "Discovery + health check: $($routable.id -join ', ') UP"
 
-$shards = @(Invoke-RestMethod -Uri "$base/api/shards" -Headers @{ 'Cache-Control' = 'no-cache' })
-$total = @(Invoke-RestMethod -Uri "$base/api/books" -Headers @{ 'Cache-Control' = 'no-cache' }).Count
-$sum = ($shards | Measure-Object -Property books -Sum).Sum
-if ($shards.Count -ne 3 -or @($shards | Where-Object { $_.books -le 0 }).Count -gt 0 -or $sum -ne $total) {
-    throw "Sharding check failed: $($shards | ForEach-Object { "$($_.name)=$($_.books)" }) total=$total"
+$databases = @(Invoke-RestMethod "$base/gateway/databases" | Where-Object status -eq 'up')
+$counts = @($databases | ForEach-Object { $_.info.books } | Select-Object -Unique)
+if ($databases.Count -lt 3 -or $counts.Count -ne 1) {
+    throw "Databases are not in sync: $($databases | ForEach-Object { "$($_.info.database)=$($_.info.books)" })"
 }
-Write-Host "Sharding: $(($shards | ForEach-Object { "$($_.name)=$($_.books)" }) -join ', ') (total $total)"
+Write-Host "Sync: $(($databases | ForEach-Object { "$($_.info.database)=$($_.info.books)" }) -join ', ')"
 
 Invoke-RestMethod -Method Delete "$base/gateway/cache" | Out-Null
 $first = Get-Headers $bookUrl @{ Accept = 'application/json' }

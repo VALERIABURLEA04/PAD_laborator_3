@@ -98,6 +98,13 @@ public sealed class ProxyHandler(
         if (ResponseCache.InvalidatesBooks(request) && result.StatusCode is >= 200 and < 300)
         {
             await cache.InvalidateBooksAsync();
+            // The other databases receive the change through the sync service about a second later;
+            // a second invalidation drops anything cached from a database that had not caught up yet.
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(options.SyncPropagationSeconds));
+                await cache.InvalidateBooksAsync();
+            });
         }
 
         await WriteUpstreamAsync(context, result);
@@ -143,14 +150,6 @@ public sealed class ProxyHandler(
                 using var response = await http.SendAsync(upstreamRequest, HttpCompletionOption.ResponseContentRead, timeout.Token);
                 var result = await UpstreamResult.FromAsync(response, backend.Id, attempts, timeout.Token);
                 var latency = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-
-                if (result.StatusCode >= 500 && result.Headers.Any(h =>
-                        h.Name.Equals("X-Shard-Unavailable", StringComparison.OrdinalIgnoreCase)))
-                {
-                    backend.Circuit.RecordSuccess();
-                    backend.RecordResult(true, latency);
-                    return result;
-                }
 
                 if (result.StatusCode >= 500)
                 {

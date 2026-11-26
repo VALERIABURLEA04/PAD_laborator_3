@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using BookCatalog.Gateway.Services;
 using StackExchange.Redis;
@@ -47,6 +48,9 @@ app.UseStaticFiles(new StaticFileOptions { RequestPath = "/dashboard" });
 app.UseRouting();
 
 app.MapGet("/", () => Results.Redirect("/dashboard/"));
+// Answered here so probes and browsers never reach an API and silently reset its circuit breaker.
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", component = "gateway" }));
+app.MapGet("/favicon.ico", () => Results.NoContent());
 
 var gateway = app.MapGroup("/gateway");
 
@@ -71,12 +75,54 @@ gateway.MapGet("/stats", async (
 
 gateway.MapGet("/backends", (BackendPool pool) => Results.Ok(pool.All.Select(ToView)));
 
+gateway.MapGet("/databases", async (BackendPool pool, IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
+{
+    var http = httpClientFactory.CreateClient("control");
+    var results = await Task.WhenAll(pool.All.Select(async backend =>
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            var info = await http.GetFromJsonAsync<System.Text.Json.JsonElement>(
+                $"{backend.Address}/api/database", timeout.Token);
+            return (object)new { backend = backend.Id, status = "up", info };
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (object)new { backend = backend.Id, status = "down", error = exception.Message };
+        }
+    }));
+    return Results.Ok(results);
+});
+
 gateway.MapPut("/backends/{id}/circuit", (string id, BackendPool pool) =>
 {
     var backend = pool.Find(id);
     if (backend is null) return Results.NotFound();
     backend.Circuit.Reset();
     return Results.Ok(ToView(backend));
+});
+
+gateway.MapPut("/backends/{id}/fault", async (string id, FaultToggle toggle, BackendPool pool,
+    IHttpClientFactory httpClientFactory, CancellationToken cancellationToken) =>
+{
+    var backend = pool.Find(id);
+    if (backend is null) return Results.NotFound();
+    try
+    {
+        var http = httpClientFactory.CreateClient("control");
+        using var response = await http.PutAsJsonAsync($"{backend.Address}/api/fault",
+            new { enabled = toggle.Enabled }, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        backend.FaultSimulated = toggle.Enabled;
+        return Results.Ok(ToView(backend));
+    }
+    catch (HttpRequestException exception)
+    {
+        return Results.Problem($"{id} did not accept the change: {exception.Message}",
+            statusCode: StatusCodes.Status502BadGateway);
+    }
 });
 
 gateway.MapPut("/balancing", (BalancingUpdate update, BalancingSettings balancing) =>
@@ -170,9 +216,12 @@ static object ToView(Backend backend) => new
     lastHealthCheckMs = Math.Round(backend.LastHealthCheckMs, 1),
     lastHealthError = backend.LastHealthError,
     millisecondsSinceHeartbeat = backend.MillisecondsSinceHeartbeat,
-    heartbeatCount = backend.HeartbeatCount
+    heartbeatCount = backend.HeartbeatCount,
+    faultSimulated = backend.FaultSimulated
 };
 
 record BalancingUpdate(string Mode);
 
 record ContainerStateUpdate(string State);
+
+record FaultToggle(bool Enabled);

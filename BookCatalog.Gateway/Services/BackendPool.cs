@@ -17,6 +17,7 @@ public sealed class Backend(string id, string address, CircuitBreaker circuit)
     public long HeartbeatCount { get; set; }
 
     public volatile bool Healthy = true;
+    public volatile bool FaultSimulated;
     public DateTimeOffset? LastHealthCheck { get; set; }
     public double LastHealthCheckMs { get; set; }
     public string? LastHealthError { get; set; }
@@ -54,8 +55,11 @@ public sealed class BackendPool(GatewayOptions options)
 
     public Backend? Find(string id) => _backends.GetValueOrDefault(id);
 
-    public void Apply(IEnumerable<DiscoveredService> services)
+    public void Apply(IReadOnlyCollection<DiscoveredService> services)
     {
+        foreach (var gone in _backends.Keys.Except(services.Select(s => s.Id), StringComparer.OrdinalIgnoreCase).ToList())
+            _backends.TryRemove(gone, out _);
+
         foreach (var service in services)
         {
             var backend = _backends.GetOrAdd(service.Id, id => new Backend(
@@ -66,7 +70,10 @@ public sealed class BackendPool(GatewayOptions options)
                     TimeSpan.FromSeconds(options.CircuitOpenSeconds))));
 
             if (backend.RegistryStatus != "up" && service.Status == "up")
+            {
                 backend.Healthy = true;
+                backend.FaultSimulated = false;
+            }
 
             backend.Address = service.Address;
             backend.RegistryStatus = service.Status;

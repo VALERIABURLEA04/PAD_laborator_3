@@ -1,5 +1,6 @@
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
+using System.Text.Json.Serialization;
 using System.Xml.Serialization;
 
 namespace BookCatalog.Api.Models;
@@ -19,4 +20,13 @@ public sealed class Book
 
     [XmlArrayItem("Tag")]
     public List<string> Tags { get; set; } = [];
+
+    [JsonIgnore, XmlIgnore]
+    public long SyncVersion { get; set; }
+
+    [JsonIgnore, XmlIgnore]
+    public string SyncOrigin { get; set; } = string.Empty;
+
+    [JsonIgnore, XmlIgnore]
+    public bool IsDeleted { get; set; }
 }

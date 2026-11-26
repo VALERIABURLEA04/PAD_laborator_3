@@ -43,31 +43,11 @@ x-api: &api
     retries: 3
     start_period: 40s
 
-x-api-depends: &api-depends
-  mongo-init1:
-    condition: service_completed_successfully
-  mongo-init2:
-    condition: service_completed_successfully
-  mongo-init3:
-    condition: service_completed_successfully
-  redis:
-    condition: service_healthy
-  discovery:
-    condition: service_healthy
-
 x-api-env: &api-env
   ASPNETCORE_ENVIRONMENT: Development
   ASPNETCORE_HTTP_PORTS: 8080
   Redis__ConnectionString: redis:6379
-  Shards__0__Name: shard1
-  Shards__0__Database: bookcatalog1
-  Shards__0__ConnectionString: "mongodb://mongo1a:27017,mongo1b:27017/?replicaSet=rs1&w=1"
-  Shards__1__Name: shard2
-  Shards__1__Database: bookcatalog2
-  Shards__1__ConnectionString: "mongodb://mongo2a:27017,mongo2b:27017/?replicaSet=rs2&w=1"
-  Shards__2__Name: shard3
-  Shards__2__Database: bookcatalog3
-  Shards__2__ConnectionString: "mongodb://mongo3a:27017,mongo3b:27017/?replicaSet=rs3&w=1"
+  Sync__Enabled: "true"
   Discovery__Url: http://discovery:8080
   Discovery__ServiceName: bookcatalog-api
   Discovery__HeartbeatSeconds: "5"
@@ -191,29 +171,74 @@ services:
       - "127.0.0.1:18081:8080"
     environment:
       <<: *api-env
-      Instance__Id: api1
+      MongoDb__ConnectionString: "mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1"
+      MongoDb__DatabaseName: bookcatalog1
+      Sync__InstanceId: api1
       Discovery__Address: http://api1:8080
-    depends_on: *api-depends
-
+    depends_on:
+      mongo-init1:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      discovery:
+        condition: service_healthy
   api2:
     <<: *api
     ports:
       - "127.0.0.1:18082:8080"
     environment:
       <<: *api-env
-      Instance__Id: api2
+      MongoDb__ConnectionString: "mongodb://mongo2a:27017,mongo2b:27017/bookcatalog2?replicaSet=rs2&w=1"
+      MongoDb__DatabaseName: bookcatalog2
+      Sync__InstanceId: api2
       Discovery__Address: http://api2:8080
-    depends_on: *api-depends
-
+    depends_on:
+      mongo-init2:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      discovery:
+        condition: service_healthy
   api3:
     <<: *api
     ports:
       - "127.0.0.1:18083:8080"
     environment:
       <<: *api-env
-      Instance__Id: api3
+      MongoDb__ConnectionString: "mongodb://mongo3a:27017,mongo3b:27017/bookcatalog3?replicaSet=rs3&w=1"
+      MongoDb__DatabaseName: bookcatalog3
+      Sync__InstanceId: api3
       Discovery__Address: http://api3:8080
-    depends_on: *api-depends
+    depends_on:
+      mongo-init3:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      discovery:
+        condition: service_healthy
+
+  sync:
+    <<: *api
+    environment:
+      <<: *api-env
+      Sync__Enabled: "false"
+      Sync__WorkerEnabled: "true"
+      Discovery__Url: ""
+      MongoDb__ConnectionString: "mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1"
+      MongoDb__DatabaseName: bookcatalog1
+      Sync__DiscoveryUrl: http://discovery:8080
+      Sync__ServiceName: bookcatalog-api
+    depends_on:
+      mongo-init1:
+        condition: service_completed_successfully
+      mongo-init2:
+        condition: service_completed_successfully
+      mongo-init3:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      discovery:
+        condition: service_healthy
 
   discovery:
     image: bookcatalog-discovery
@@ -291,21 +316,15 @@ services:
     image: mongo:8.0
     profiles: ["seed"]
     mem_limit: 256m
-    entrypoint: ["mongosh", "--nodb", "--quiet"]
-    command: ["/seed.js"]
+    entrypoint: ["mongosh"]
+    command: ["mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1&w=1", "/seed.js"]
     environment:
+      SEED_DATABASE: bookcatalog1
       SEED_COUNT: "300"
-      SHARD_1: "mongodb://mongo1a:27017,mongo1b:27017/bookcatalog1?replicaSet=rs1"
-      SHARD_2: "mongodb://mongo2a:27017,mongo2b:27017/bookcatalog2?replicaSet=rs2"
-      SHARD_3: "mongodb://mongo3a:27017,mongo3b:27017/bookcatalog3?replicaSet=rs3"
     volumes:
       - ./scripts/seed.js:/seed.js:ro
     depends_on:
       mongo-init1:
-        condition: service_completed_successfully
-      mongo-init2:
-        condition: service_completed_successfully
-      mongo-init3:
         condition: service_completed_successfully
 
 volumes:
